@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
 )
 from config import UNDO_EMOJI, CLEAR_EMOJI, RESET_EMOJI, SIMULATE_EMOJI, STATS_EMOJI, SIMULATE_MULTI_EMOJI
 from ui.widgets.prediction_view import PredictionLabel
-from ui.widgets.wl_prediction_view import WLPredictionWidget  # Yeni WL tahmin widgeti
+from ui.widgets.enhanced_wl_prediction_view import EnhancedWLPredictionWidget  # Yeni geliştirilmiş WL tahmin widgeti
 from PyQt6.QtCore import Qt
 
 class StatRowWidget(QWidget):
@@ -47,12 +47,18 @@ class KasaStatWidget(QWidget):
         self.wl_reverse_row = StatRowWidget("Ters Bahis Başarı:", "WLReverseValueLabel")
         self.wl_normal_row = StatRowWidget("Normal Bahis Başarı:", "WLNormalValueLabel")
         
+        # Yeni eklenen satırlar - Yatay/Dikey tahmin performansı
+        self.horizontal_wl_row = StatRowWidget("Yatay WL Başarı:", "HorizontalWLValueLabel")
+        self.vertical_wl_row = StatRowWidget("Dikey WL Başarı:", "VerticalWLValueLabel")
+        
         self.layout.addWidget(self.kasa_row)
         self.layout.addWidget(self.bet_row)
         self.layout.addWidget(self.win_streak_row)
         self.layout.addWidget(self.loss_streak_row)
         self.layout.addWidget(self.wl_reverse_row)
         self.layout.addWidget(self.wl_normal_row)
+        self.layout.addWidget(self.horizontal_wl_row)
+        self.layout.addWidget(self.vertical_wl_row)
     
     def update_stats(self, stats):
         self.kasa_row.set_value(f"{stats['kasa']:,.2f} TL")
@@ -65,6 +71,12 @@ class KasaStatWidget(QWidget):
             self.wl_reverse_row.set_value(f"{stats['reverse_accuracy']:.1f}% ({stats['reverse_bet_wins']}/{stats['reverse_bet_count']})")
         if 'normal_accuracy' in stats:
             self.wl_normal_row.set_value(f"{stats['normal_accuracy']:.1f}% ({stats['normal_bet_wins']}/{stats['normal_bet_count']})")
+            
+        # Yatay/Dikey WL tahmin performansını güncelle
+        if 'horizontal_wl_accuracy' in stats:
+            self.horizontal_wl_row.set_value(f"{stats['horizontal_wl_accuracy']:.1f}% ({stats['horizontal_wl_correct']}/{stats['horizontal_wl_predictions']})")
+        if 'vertical_wl_accuracy' in stats:
+            self.vertical_wl_row.set_value(f"{stats['vertical_wl_accuracy']:.1f}% ({stats['vertical_wl_correct']}/{stats['vertical_wl_predictions']})")
 
 class TableStatWidget(QWidget):
     """Masa istatistiklerini gösteren basit widget."""
@@ -113,7 +125,7 @@ class LeftPanel(QWidget):
         self.banker_button = None
         self.kasa_widget = None
         self.prediction_label = None
-        self.wl_prediction_widget = None  # Yeni WL tahmin widgeti
+        self.wl_prediction_widget = None  # Geliştirilmiş WL tahmin widget
         self.table_stat_widget = None
         self.action_buttons = {}
         
@@ -173,8 +185,8 @@ class LeftPanel(QWidget):
         self.prediction_label = PredictionLabel()
         pred_layout.addWidget(self.prediction_label)
         
-        # WL tahmin widgeti oluştur ve ekle
-        self.wl_prediction_widget = WLPredictionWidget()
+        # Geliştirilmiş WL tahmin widgeti oluştur ve ekle
+        self.wl_prediction_widget = EnhancedWLPredictionWidget()
         pred_layout.addWidget(self.wl_prediction_widget)
         
         self.layout.addWidget(pred_group_box)
@@ -238,13 +250,26 @@ class LeftPanel(QWidget):
         """
         self.table_stat_widget.update_stats(stats)
     
-    def update_prediction(self, prediction, wl_prediction='?', reverse_bet=False):
+    def update_prediction(self, prediction, wl_prediction='?', reverse_bet=False, h_pred='?', v_pred='?', h_accuracy=None, v_accuracy=None):
         """Tahmin gösterimini günceller.
         
         Args:
             prediction (str): Tahmin değeri ('P', 'B' veya '?').
             wl_prediction (str): WL tahmin değeri ('W', 'L' veya '?').
             reverse_bet (bool): Ters bahis yapılıp yapılmayacağı.
+            h_pred (str): Yatay WL tahmin değeri.
+            v_pred (str): Dikey WL tahmin değeri.
+            h_accuracy (float): Yatay tahmin doğruluk oranı.
+            v_accuracy (float): Dikey tahmin doğruluk oranı.
         """
         self.prediction_label.update_prediction(prediction)
-        self.wl_prediction_widget.update_prediction(wl_prediction, reverse_bet)
+        
+        # Geliştirilmiş WL tahmin widgetini güncelle
+        self.wl_prediction_widget.update_prediction(
+            wl_prediction, 
+            h_pred, 
+            v_pred, 
+            reverse_bet,
+            h_accuracy,
+            v_accuracy
+        )

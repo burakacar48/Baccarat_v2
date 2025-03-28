@@ -2,8 +2,8 @@
 Tahmin algoritmalarını ve model istatistiklerini içeren modül.
 """
 from config import GRID_SIZE
-from models.adaptive_learning import AdaptiveLearningModel  # Yeni eklediğimiz modül
-from models.wl_prediction import WLPredictionModel  # WL tahmin modeli
+from models.adaptive_learning import AdaptiveLearningModel
+from models.enhanced_wl_prediction import EnhancedWLPredictionModel
 
 class PredictionModel:
     """Tahmin modellerini ve ilgili istatistikleri yöneten sınıf."""
@@ -14,11 +14,13 @@ class PredictionModel:
             grid_data (list, optional): Grid verileri için referans.
         """
         self.grid_data = grid_data if grid_data else [[None for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
-        self.adaptive_model = AdaptiveLearningModel()  # Yeni adaptif öğrenme modeli
-        self.wl_model = WLPredictionModel(lookback_pairs=5)  # WL tahmin modeli
+        self.adaptive_model = AdaptiveLearningModel()
+        self.wl_model = EnhancedWLPredictionModel(lookback_pairs=5)  # Geliştirilmiş WL tahmin modeli
         self.models = self._initialize_models()
-        self.current_wl_prediction = '?'  # WL tahmini için yeni değişken
-        self.should_reverse_bet = False  # Ters bahis yapma durumu
+        self.current_wl_prediction = '?'
+        self.current_horizontal_wl_pred = '?' 
+        self.current_vertical_wl_pred = '?'
+        self.should_reverse_bet = False
     
     def _initialize_models(self):
         """Tahmin modellerini başlatır.
@@ -35,9 +37,9 @@ class PredictionModel:
             {'name': 'Grid 2x2', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': self.predict_grid_pattern_2x2},
             {'name': 'Grid 3x3', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': self.predict_grid_pattern_3x3},
             {'name': 'Veritabanı', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': None},  # DB tahmin işlevi dışarıdan atanacak
-            {'name': 'Adaptif Öğr.', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': self.predict_adaptive},  # Yeni model
-            {'name': 'Grid Adaptif', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': self.predict_grid_adaptive},  # Yeni grid tabanlı adaptif model
-            {'name': 'WL Tersine', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': self.predict_wl_reverse},  # WL ters tahmin modeli
+            {'name': 'Adaptif Öğr.', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': self.predict_adaptive},
+            {'name': 'Grid Adaptif', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': self.predict_grid_adaptive},
+            {'name': 'WL Tersine', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': self.predict_wl_reverse},
         ]
     
     def set_db_prediction_function(self, db_predict_func):
@@ -72,11 +74,13 @@ class PredictionModel:
         # Geçmiş kopyasını saklayalım (adaptif model için kullanacağız)
         self.history_snapshot = history.copy()
         
-        # WL tahmini yap
+        # WL tahmini yap (geliştirilmiş model kullanılıyor)
         if wl_history:
-            should_reverse, wl_pred = self.wl_model.should_reverse_bet(wl_history, None)
+            should_reverse, wl_pred, h_pred, v_pred = self.wl_model.should_reverse_bet(wl_history, None)
             self.should_reverse_bet = should_reverse
             self.current_wl_prediction = wl_pred
+            self.current_horizontal_wl_pred = h_pred
+            self.current_vertical_wl_pred = v_pred
         
         predictions = {}
         for model in self.models:
@@ -115,9 +119,11 @@ class PredictionModel:
                 # Yeterli veri yoksa varsayılan olarak son sonucu takip et
                 best_model_pred = self.predict_follow_last(history)
             
-            should_reverse, wl_pred = self.wl_model.should_reverse_bet(wl_history, best_model_pred)
+            should_reverse, wl_pred, h_pred, v_pred = self.wl_model.should_reverse_bet(wl_history, best_model_pred)
             self.should_reverse_bet = should_reverse
             self.current_wl_prediction = wl_pred
+            self.current_horizontal_wl_pred = h_pred
+            self.current_vertical_wl_pred = v_pred
             
             # Ters bahis yapılacaksa tahminimizi tersine çevir
             if should_reverse and best_model_pred != '?':
@@ -178,12 +184,24 @@ class PredictionModel:
         if hasattr(self, 'adaptive_model'):
             self.adaptive_model.clear_memory()
         self.current_wl_prediction = '?'
+        self.current_horizontal_wl_pred = '?'
+        self.current_vertical_wl_pred = '?'
         self.should_reverse_bet = False
     
     def close(self):
         """Kaynakları serbest bırakır."""
         if hasattr(self, 'adaptive_model'):
             self.adaptive_model.close()
+    
+    def update_wl_weights(self, h_accuracy, v_accuracy):
+        """WL tahmin ağırlıklarını günceller.
+        
+        Args:
+            h_accuracy (float): Yatay tahmin doğruluk oranı.
+            v_accuracy (float): Dikey tahmin doğruluk oranı.
+        """
+        if hasattr(self, 'wl_model') and hasattr(self.wl_model, 'update_weights'):
+            self.wl_model.update_weights(h_accuracy/100.0, v_accuracy/100.0)
     
     # Tahmin algoritmaları
     def predict_follow_last(self, current_history):

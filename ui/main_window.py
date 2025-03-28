@@ -103,6 +103,11 @@ class MainWindow(QMainWindow):
         self.db_write_timer.timeout.connect(self.flush_db_buffer)
         self.db_write_timer.start(DB_WRITE_INTERVAL)
         
+        # WL ağırlık güncelleme zamanlayıcısı
+        self.wl_weight_timer = QTimer(self)
+        self.wl_weight_timer.timeout.connect(self.update_wl_weights)
+        self.wl_weight_timer.start(60000)  # Her 1 dakikada bir
+        
         # Arayüz ayarları
         self.setWindowTitle(WINDOW_TITLE)
         self.resize(950, 650)
@@ -168,6 +173,12 @@ class MainWindow(QMainWindow):
         if current_prediction not in ['?', None]:
             is_win = (current_prediction == winner)
         
+        # WL tahminlerini game_history'ye kaydet
+        self.game_history.set_wl_predictions(
+            self.prediction_model.current_horizontal_wl_pred,
+            self.prediction_model.current_vertical_wl_pred
+        )
+        
         # Sonucu kaydet (reverse bet durumunu da belirt)
         result_info = self.game_history.add_result(winner, is_win, should_reverse_bet)
         
@@ -193,6 +204,9 @@ class MainWindow(QMainWindow):
         
         # Model doğruluk oranlarını güncelle
         self.prediction_model.update_model_accuracy(winner, model_predictions)
+        
+        # WL tahmin ağırlıklarını güncelle
+        self.update_wl_weights()
         
         # UI'yi güncelle
         self._full_ui_update()
@@ -221,6 +235,15 @@ class MainWindow(QMainWindow):
     def flush_db_buffer(self):
         """Veritabanı tamponunu temizler."""
         self.db_manager.flush_buffer()
+    
+    def update_wl_weights(self):
+        """WL tahmin ağırlıklarını günceller."""
+        stats = self.game_history.get_statistics()
+        if 'horizontal_wl_accuracy' in stats and 'vertical_wl_accuracy' in stats:
+            self.prediction_model.update_wl_weights(
+                stats['horizontal_wl_accuracy'],
+                stats['vertical_wl_accuracy']
+            )
     
     def toggle_simulation(self):
         """Simülasyonu başlatır veya durdurur."""
@@ -343,6 +366,12 @@ class MainWindow(QMainWindow):
             # Mevcut tahmini al (ve ters bahis yapılıp yapılmayacağını)
             current_prediction, should_reverse_bet = self.get_current_prediction()
             
+            # WL tahminlerini kaydet
+            self.game_history.set_wl_predictions(
+                self.prediction_model.current_horizontal_wl_pred,
+                self.prediction_model.current_vertical_wl_pred
+            )
+            
             # Tahmini kontrol et ve kazanıp kazanmadığını belirle
             is_win = None
             if current_prediction not in ['?', None]:
@@ -362,6 +391,9 @@ class MainWindow(QMainWindow):
             
             # Model doğruluk oranlarını güncelle
             self.prediction_model.update_model_accuracy(winner, model_predictions)
+            
+            # WL ağırlıklarını güncelle
+            self.update_wl_weights()
             
             # UI'yi güncelle
             self._full_ui_update()
@@ -401,7 +433,22 @@ class MainWindow(QMainWindow):
         # Tahmin gösterimini güncelle
         current_prediction, should_reverse_bet = self.get_current_prediction()
         wl_prediction = self.prediction_model.current_wl_prediction
-        self.left_panel.update_prediction(current_prediction, wl_prediction, should_reverse_bet)
+        h_pred = self.prediction_model.current_horizontal_wl_pred
+        v_pred = self.prediction_model.current_vertical_wl_pred
+        
+        # Doğruluk oranlarını al
+        h_accuracy = stats.get('horizontal_wl_accuracy', 0)
+        v_accuracy = stats.get('vertical_wl_accuracy', 0)
+        
+        self.left_panel.update_prediction(
+            current_prediction, 
+            wl_prediction, 
+            should_reverse_bet,
+            h_pred,
+            v_pred,
+            h_accuracy,
+            v_accuracy
+        )
         
         # Sağ panel güncellemeleri
         self.right_panel.update_result_grid(self.game_history.grid_data)
@@ -426,4 +473,4 @@ class MainWindow(QMainWindow):
             self.db_manager.close()
             print("Veritabanı bağlantısı kapatıldı.")
         
-        super().closeEvent
+        super().closeEvent(event)

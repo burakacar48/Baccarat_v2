@@ -19,6 +19,8 @@ class EnhancedWLPredictionModel:
         self.grid_cols = grid_cols
         self.horizontal_weight = 0.6  # Yatay tahmin ağırlığı
         self.vertical_weight = 0.4    # Dikey tahmin ağırlığı
+        self.last_horizontal_pred = '?'
+        self.last_vertical_pred = '?'
         
     def predict_horizontal(self, wl_history):
         """
@@ -74,6 +76,8 @@ class EnhancedWLPredictionModel:
             elif len(wl_history) > 0:
                 return 'W' if wl_history[-1] == 'L' else 'L'
         
+        # Son yatay tahmini sakla
+        self.last_horizontal_pred = best_prediction
         return best_prediction
     
     def predict_vertical(self, wl_history):
@@ -146,7 +150,11 @@ class EnhancedWLPredictionModel:
             return '?'
         
         # En çok tahmin edilen sonucu döndür
-        return Counter(predictions).most_common(1)[0][0]
+        result = Counter(predictions).most_common(1)[0][0]
+        
+        # Son dikey tahmini sakla
+        self.last_vertical_pred = result
+        return result
     
     def predict(self, wl_history):
         """
@@ -187,17 +195,17 @@ class EnhancedWLPredictionModel:
             main_prediction (str): Ana tahmin ('P' veya 'B').
             
         Returns:
-            tuple: (should_reverse, predicted_wl) - Tersine bahis yapılmalı mı ve WL tahmini.
+            tuple: (should_reverse, predicted_wl, horizontal_pred, vertical_pred) - Tersine bahis yapılmalı mı, WL tahmini ve ayrı tahminler.
         """
         if not wl_history:
-            return False, '?'
+            return False, '?', '?', '?'
             
         predicted_wl = self.predict(wl_history)
         
         # Tahmin kayıp veya belirsizse, bahsi tersine çevir
         should_reverse = predicted_wl == 'L'
         
-        return should_reverse, predicted_wl
+        return should_reverse, predicted_wl, self.last_horizontal_pred, self.last_vertical_pred
     
     def update_weights(self, horizontal_success, vertical_success):
         """

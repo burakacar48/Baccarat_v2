@@ -29,6 +29,16 @@ class GameHistory:
         self.reverse_bet_wins = 0
         self.normal_bet_count = 0
         self.normal_bet_wins = 0
+        
+        # Yatay ve dikey tahmin istatistikleri
+        self.horizontal_wl_predictions = 0
+        self.horizontal_wl_correct = 0
+        self.vertical_wl_predictions = 0
+        self.vertical_wl_correct = 0
+        
+        # Son tahminleri saklama
+        self.last_horizontal_wl_pred = '?'
+        self.last_vertical_wl_pred = '?'
     
     def clear_histories(self):
         """Sadece geçmiş verilerini sıfırlar, kasa durumunu korur."""
@@ -44,6 +54,16 @@ class GameHistory:
         self.reverse_bet_wins = 0
         self.normal_bet_count = 0
         self.normal_bet_wins = 0
+        
+        # Yatay ve dikey tahmin istatistiklerini sıfırla
+        self.horizontal_wl_predictions = 0
+        self.horizontal_wl_correct = 0
+        self.vertical_wl_predictions = 0
+        self.vertical_wl_correct = 0
+        
+        # Son tahminleri sıfırla
+        self.last_horizontal_wl_pred = '?'
+        self.last_vertical_wl_pred = '?'
     
     def add_result(self, winner, is_win=None, is_reverse_bet=False):
         """Yeni bir sonuç ekler ve gerekli istatistikleri günceller.
@@ -87,6 +107,12 @@ class GameHistory:
                     self.reverse_bet_wins += 1
                 else:
                     self.normal_bet_wins += 1
+                    
+                # WL tahmin doğruluğunu güncelle
+                if self.last_horizontal_wl_pred == 'W':
+                    self.horizontal_wl_correct += 1
+                if self.last_vertical_wl_pred == 'W':
+                    self.vertical_wl_correct += 1
             else:  # Kayıp
                 result_info['bet_change'] = -current_bet
                 self.win_loss_history.append('L')
@@ -98,16 +124,42 @@ class GameHistory:
                 if self.current_bet_index >= len(MARTINGALE_SEQUENCE):
                     self.current_bet_index = 0
                     print("Martingale sonu! Başa dönülüyor.")
+                    
+                # WL tahmin doğruluğunu güncelle
+                if self.last_horizontal_wl_pred == 'L':
+                    self.horizontal_wl_correct += 1
+                if self.last_vertical_wl_pred == 'L':
+                    self.vertical_wl_correct += 1
             
-            # Increment bet type counters
+            # Increment betting counters
             if is_reverse_bet:
                 self.reverse_bet_count += 1
             else:
                 self.normal_bet_count += 1
+                
+            # WL tahmin sayaçlarını güncelle
+            if self.last_horizontal_wl_pred != '?':
+                self.horizontal_wl_predictions += 1
+            if self.last_vertical_wl_pred != '?':
+                self.vertical_wl_predictions += 1
+            
+            # Tahminleri temizle
+            self.last_horizontal_wl_pred = '?'
+            self.last_vertical_wl_pred = '?'
         
         self._rebuild_grid_from_history()
         
         return result_info
+    
+    def set_wl_predictions(self, horizontal_pred, vertical_pred):
+        """Yeni WL tahminlerini kaydeder.
+        
+        Args:
+            horizontal_pred (str): Yatay WL tahmini ('W', 'L' veya '?').
+            vertical_pred (str): Dikey WL tahmini ('W', 'L' veya '?').
+        """
+        self.last_horizontal_wl_pred = horizontal_pred
+        self.last_vertical_wl_pred = vertical_pred
     
     def undo_last_action(self):
         """Son eklenen sonucu geri alır.
@@ -181,6 +233,15 @@ class GameHistory:
         normal_accuracy = 0
         if self.normal_bet_count > 0:
             normal_accuracy = (self.normal_bet_wins / self.normal_bet_count) * 100
+            
+        # Calculate WL prediction accuracies
+        h_accuracy = 0
+        if self.horizontal_wl_predictions > 0:
+            h_accuracy = (self.horizontal_wl_correct / self.horizontal_wl_predictions) * 100
+            
+        v_accuracy = 0
+        if self.vertical_wl_predictions > 0:
+            v_accuracy = (self.vertical_wl_correct / self.vertical_wl_predictions) * 100
         
         stats = {
             'total_hands': total_hands,
@@ -200,7 +261,13 @@ class GameHistory:
             'reverse_accuracy': reverse_accuracy,
             'normal_bet_count': self.normal_bet_count,
             'normal_bet_wins': self.normal_bet_wins,
-            'normal_accuracy': normal_accuracy
+            'normal_accuracy': normal_accuracy,
+            'horizontal_wl_predictions': self.horizontal_wl_predictions,
+            'horizontal_wl_correct': self.horizontal_wl_correct,
+            'horizontal_wl_accuracy': h_accuracy,
+            'vertical_wl_predictions': self.vertical_wl_predictions,
+            'vertical_wl_correct': self.vertical_wl_correct,
+            'vertical_wl_accuracy': v_accuracy
         }
         
         return stats
