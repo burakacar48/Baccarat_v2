@@ -92,6 +92,11 @@ class MainWindow(QMainWindow):
         # Simülasyon değişkenleri
         self.current_hand_in_shoe = 0
         self.pause_simulation = False
+        self.simulation_running = False  # Simülasyonun çalışıp çalışmadığını takip etmek için
+        
+        # Simülasyon zamanlayıcısı
+        self.simulation_timer = QTimer(self)
+        self.simulation_timer.timeout.connect(self.simulate_step)
         
         # Veritabanı yazma zamanlayıcısı
         self.db_write_timer = QTimer(self)
@@ -140,7 +145,7 @@ class MainWindow(QMainWindow):
         self.left_panel.action_buttons["undo"].clicked.connect(self.undo_last_action)
         self.left_panel.action_buttons["clear"].clicked.connect(self.clear_histories)
         self.left_panel.action_buttons["reset"].clicked.connect(self.reset_all)
-        self.left_panel.action_buttons["simulate"].clicked.connect(self.simulate_step)
+        self.left_panel.action_buttons["simulate"].clicked.connect(self.toggle_simulation)
         self.left_panel.action_buttons["stats"].clicked.connect(self.open_model_details_window)
     
     def add_result(self, winner):
@@ -197,6 +202,25 @@ class MainWindow(QMainWindow):
         """Veritabanı tamponunu temizler."""
         self.db_manager.flush_buffer()
     
+    def toggle_simulation(self):
+        """Simülasyonu başlatır veya durdurur."""
+        if self.simulation_running:
+            # Eğer simülasyon çalışıyorsa, durdur
+            self.simulation_timer.stop()
+            self.simulation_running = False
+            self.left_panel.action_buttons["simulate"].setText("▶️")
+            self.left_panel.action_buttons["simulate"].setToolTip("Gerçek Baccarat Simüle Et")
+            print("Simülasyon durduruldu.")
+        else:
+            # Eğer simülasyon çalışmıyorsa, başlat
+            self.simulation_timer.start(100)  # 100ms aralıklarla simülasyon
+            self.simulation_running = True
+            self.left_panel.action_buttons["simulate"].setText("⏹️")
+            self.left_panel.action_buttons["simulate"].setToolTip("Simülasyonu Durdur")
+            # Pause durumunu sıfırla, kullanıcı başlattığında her zaman baştan bahis yapmasını sağlar
+            self.pause_simulation = False
+            print("Simülasyon başlatıldı.")
+    
     def undo_last_action(self):
         """Son eklenen sonucu geri alır."""
         if self.game_history.undo_last_action():
@@ -242,43 +266,68 @@ class MainWindow(QMainWindow):
             print("Her şey sıfırlandı.")
     
     def simulate_step(self):
-        """Baccarat simülasyonu ile sonuç ekler, 35. elden sonra kazanınca duraklar."""
-        # Eğer simülasyon duraklatılmışsa işlem yapma
-        if self.pause_simulation:
-            print("Simülasyon duraklatıldı. Yeni shoe başladığında otomatik olarak devam edecek.")
-            return
-            
+        """Bir adım baccarat simülasyonu yapar."""
         # Use the enhanced baccarat simulator
         winner = get_next_result()  # This will return 'P' or 'B' according to proper baccarat rules
         
-        # Shoe değişimini kontrol et (yeni shoe başladığında sayacı ve duraklatma durumunu sıfırla)
+        # Shoe değişimini kontrol et
         new_shoe_detected = getattr(self.game_history, 'new_shoe_detected', False)
         if new_shoe_detected:
+            # Yeni shoe başladığında geçmiş verileri temizle
+            self.game_history.clear_histories()
             self.current_hand_in_shoe = 0
             self.pause_simulation = False
-            print("Yeni shoe başladı, simülasyon devam ediyor.")
-            
+            print("Yeni shoe başladı, geçmiş temizlendi, simülasyon devam ediyor.")
+        
         # El sayısını arttır
         self.current_hand_in_shoe += 1
-        
-        # Sonucu ekle
-        print(f"Simülasyon: El #{self.current_hand_in_shoe} - Sonuç: {winner}")
         
         # Mevcut tahmini al
         current_prediction = self.get_current_prediction()
         
         # Tahmini kontrol et ve kazanıp kazanmadığını belirle
         is_win = None
-        if current_prediction not in ['?', None]:
-            is_win = (current_prediction == winner)
         
-        # Sonucu ekle
-        self.add_result(winner)
-        
-        # 35. elden sonra kazanç durumunda simülasyonu duraksat
-        if self.current_hand_in_shoe > 35 and is_win:
-            self.pause_simulation = True
-            print("35. elden sonra kazanç gerçekleşti. Simülasyon duraklatıldı. Yeni shoe başladığında devam edecek.")
+        # 35. elden sonra kazanç durumunda bahis yapmayı durdur (simülasyon devam eder)
+        if self.pause_simulation and not new_shoe_detected:
+            # Sonucu griddeki geçmişe ekle ama bahis yapma
+            self.game_history.history.append(winner)
+            self.game_history._rebuild_grid_from_history()
+            # Veritabanına ekle
+            self.db_manager.add_result(winner)
+            # UI'yi güncelle
+            self._full_ui_update()
+            print(f"Simülasyon: El #{self.current_hand_in_shoe} - Sonuç: {winner} - Bahis yapılmıyor (izleme modu)")
+        else:
+            # Normal şekilde bahis yaparak sonucu ekle
+            if current_prediction not in ['?', None]:
+                is_win = (current_prediction == winner)
+            
+            # Sonucu ekle (bahisle birlikte)
+            result_info = self.game_history.add_result(winner, is_win)
+            
+            # Veritabanına ekle
+            self.db_manager.add_result(winner)
+            
+            # Tüm modellerin tahminlerini topla
+            model_predictions = self.prediction_model.get_predictions(self.game_history.history)
+            
+            # Model doğruluk oranlarını güncelle
+            self.prediction_model.update_model_accuracy(winner, model_predictions)
+            
+            # UI'yi güncelle
+            self._full_ui_update()
+            
+            # Sonuç bilgisi göster
+            if is_win is not None:
+                result_str = "Kazandı!" if is_win else "Kaybetti!"
+                bet_change_str = f"+{result_info['current_bet']:.2f}" if is_win else f"-{result_info['current_bet']:.2f}"
+                print(f"Simülasyon: El #{self.current_hand_in_shoe} - Sonuç: {winner} - {result_str} {bet_change_str} TL. Yeni Kasa: {self.game_history.kasa:.2f}.")
+            
+            # 35. elden sonra kazanç durumunda bahis duraklatılır
+            if self.current_hand_in_shoe > 35 and is_win:
+                self.pause_simulation = True
+                print("35. elden sonra kazanç gerçekleşti. Bahis yapma duraklatıldı. Yeni shoe başlayana kadar izleme modunda.")
     
     def open_model_details_window(self):
         """Model detayları penceresini açar."""
@@ -311,6 +360,10 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         """Uygulama kapatılırken çağrılır."""
+        # Simülasyonu durdur
+        if self.simulation_running:
+            self.simulation_timer.stop()
+            
         print("Uygulama kapanıyor, DB buffer flush ediliyor...")
         self.flush_db_buffer()
         if self.db_manager:
