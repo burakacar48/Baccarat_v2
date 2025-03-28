@@ -76,6 +76,18 @@ class PredictionModel:
         
         # WL tahmini yap (geliştirilmiş model kullanılıyor)
         if wl_history:
+            # Desen türünü belirle
+            pattern_type = "mixed"
+            if len(wl_history) >= 4:
+                last_four = wl_history[-4:]
+                
+                # Streak (WWWW veya LLLL)
+                if all(x == 'W' for x in last_four) or all(x == 'L' for x in last_four):
+                    pattern_type = "streak"
+                # Alternating (WLWL veya LWLW)
+                elif (last_four == ['W', 'L', 'W', 'L'] or last_four == ['L', 'W', 'L', 'W']):
+                    pattern_type = "alternating"
+            
             should_reverse, wl_pred, h_pred, v_pred = self.wl_model.should_reverse_bet(wl_history, None)
             self.should_reverse_bet = should_reverse
             self.current_wl_prediction = wl_pred
@@ -90,13 +102,14 @@ class PredictionModel:
                 predictions[model['name']] = '?'
         return predictions
     
-    def get_best_model_prediction(self, history, wl_history=None, min_predictions=5):
+    def get_best_model_prediction(self, history, wl_history=None, min_predictions=5, pattern_type=None):
         """En yüksek doğruluk oranına sahip modelin tahminini döndürür.
         
         Args:
             history (list): Oyun geçmişi.
             wl_history (list, optional): Kazanç/kayıp geçmişi.
             min_predictions (int, optional): Minimum tahmin sayısı.
+            pattern_type (str, optional): Mevcut desen tipi (streak, alternating, mixed)
             
         Returns:
             tuple: (tahmin, ters_bahis_yapılmalı) - Tahmin ('P', 'B' veya '?') ve ters bahis yapılıp yapılmayacağı.
@@ -119,6 +132,7 @@ class PredictionModel:
                 # Yeterli veri yoksa varsayılan olarak son sonucu takip et
                 best_model_pred = self.predict_follow_last(history)
             
+            # Desen tipini WL modeline ilet
             should_reverse, wl_pred, h_pred, v_pred = self.wl_model.should_reverse_bet(wl_history, best_model_pred)
             self.should_reverse_bet = should_reverse
             self.current_wl_prediction = wl_pred

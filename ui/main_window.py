@@ -159,6 +159,18 @@ class MainWindow(QMainWindow):
         Args:
             winner (str): Kazananı temsil eden 'P' veya 'B' değeri.
         """
+        # Desen türünü belirle
+        pattern_type = "mixed"
+        if len(self.game_history.win_loss_history) >= 4:
+            last_four = self.game_history.win_loss_history[-4:]
+            
+            # Streak (WWWW veya LLLL)
+            if all(x == 'W' for x in last_four) or all(x == 'L' for x in last_four):
+                pattern_type = "streak"
+            # Alternating (WLWL veya LWLW)
+            elif (last_four == ['W', 'L', 'W', 'L'] or last_four == ['L', 'W', 'L', 'W']):
+                pattern_type = "alternating"
+        
         # Mevcut tahmini al
         current_prediction, should_reverse_bet = self.get_current_prediction()
         
@@ -173,10 +185,11 @@ class MainWindow(QMainWindow):
         if current_prediction not in ['?', None]:
             is_win = (current_prediction == winner)
         
-        # WL tahminlerini game_history'ye kaydet
+        # WL tahminlerini game_history'ye kaydet (desen türünü de geçir)
         self.game_history.set_wl_predictions(
-            self.prediction_model.current_horizontal_wl_pred,
-            self.prediction_model.current_vertical_wl_pred
+            self.prediction_model.wl_model.last_horizontal_pred,
+            self.prediction_model.wl_model.last_vertical_pred,
+            pattern_type
         )
         
         # Sonucu kaydet (reverse bet durumunu da belirt)
@@ -224,10 +237,23 @@ class MainWindow(QMainWindow):
         Returns:
             tuple: (prediction, should_reverse_bet) - Tahmin değeri ('P', 'B' veya '?') ve ters bahis yapılıp yapılmayacağı.
         """
-        # WL based prediction with possible reverse bet
+        # Önce desen türünü belirle
+        pattern_type = "mixed"
+        if len(self.game_history.win_loss_history) >= 4:
+            last_four = self.game_history.win_loss_history[-4:]
+            
+            # Streak (WWWW veya LLLL)
+            if all(x == 'W' for x in last_four) or all(x == 'L' for x in last_four):
+                pattern_type = "streak"
+            # Alternating (WLWL veya LWLW)
+            elif (last_four == ['W', 'L', 'W', 'L'] or last_four == ['L', 'W', 'L', 'W']):
+                pattern_type = "alternating"
+        
+        # WL based prediction with possible reverse bet, desen türünü de geçir
         prediction, should_reverse_bet = self.prediction_model.get_best_model_prediction(
             self.game_history.history,
-            self.game_history.win_loss_history
+            self.game_history.win_loss_history,
+            pattern_type=pattern_type
         )
         
         return prediction, should_reverse_bet
@@ -239,10 +265,19 @@ class MainWindow(QMainWindow):
     def update_wl_weights(self):
         """WL tahmin ağırlıklarını günceller."""
         stats = self.game_history.get_statistics()
-        if 'horizontal_wl_accuracy' in stats and 'vertical_wl_accuracy' in stats:
-            self.prediction_model.update_wl_weights(
-                stats['horizontal_wl_accuracy'],
-                stats['vertical_wl_accuracy']
+        
+        # Son tahminlerin başarı oranlarını kullan (daha dinamik güncelleme)
+        h_rate, v_rate = self.game_history.get_recent_wl_success_rates()
+        
+        # Eğer son başarı oranları mevcutsa (yeterli tahmin yapıldıysa) onları kullan
+        if len(self.game_history.recent_horizontal_results) >= 5 and len(self.game_history.recent_vertical_results) >= 5:
+            self.prediction_model.wl_model.update_weights(h_rate, v_rate, momentum=0.7)
+        # Değilse genel başarı oranlarını kullan
+        elif 'horizontal_wl_accuracy' in stats and 'vertical_wl_accuracy' in stats:
+            self.prediction_model.wl_model.update_weights(
+                stats['horizontal_wl_accuracy'] / 100.0,
+                stats['vertical_wl_accuracy'] / 100.0,
+                momentum=0.7
             )
     
     def toggle_simulation(self):
@@ -362,14 +397,27 @@ class MainWindow(QMainWindow):
             self._full_ui_update()
             print(f"Simülasyon: El #{self.current_hand_in_shoe} - Sonuç: {winner} - Bahis yapılmıyor (izleme modu)")
         else:
+            # Desen türünü belirle
+            pattern_type = "mixed"
+            if len(self.game_history.win_loss_history) >= 4:
+                last_four = self.game_history.win_loss_history[-4:]
+                
+                # Streak (WWWW veya LLLL)
+                if all(x == 'W' for x in last_four) or all(x == 'L' for x in last_four):
+                    pattern_type = "streak"
+                # Alternating (WLWL veya LWLW)
+                elif (last_four == ['W', 'L', 'W', 'L'] or last_four == ['L', 'W', 'L', 'W']):
+                    pattern_type = "alternating"
+            
             # Bahis yaparak devam et
             # Mevcut tahmini al (ve ters bahis yapılıp yapılmayacağını)
             current_prediction, should_reverse_bet = self.get_current_prediction()
             
             # WL tahminlerini kaydet
             self.game_history.set_wl_predictions(
-                self.prediction_model.current_horizontal_wl_pred,
-                self.prediction_model.current_vertical_wl_pred
+                self.prediction_model.wl_model.last_horizontal_pred,
+                self.prediction_model.wl_model.last_vertical_pred,
+                pattern_type
             )
             
             # Tahmini kontrol et ve kazanıp kazanmadığını belirle
@@ -436,18 +484,15 @@ class MainWindow(QMainWindow):
         h_pred = self.prediction_model.current_horizontal_wl_pred
         v_pred = self.prediction_model.current_vertical_wl_pred
         
-        # Doğruluk oranlarını al
-        h_accuracy = stats.get('horizontal_wl_accuracy', 0)
-        v_accuracy = stats.get('vertical_wl_accuracy', 0)
-        
+        # İstatistikleri tahmin gösterimi için ilet
         self.left_panel.update_prediction(
             current_prediction, 
             wl_prediction, 
             should_reverse_bet,
             h_pred,
             v_pred,
-            h_accuracy,
-            v_accuracy
+            stats,
+            stats
         )
         
         # Sağ panel güncellemeleri

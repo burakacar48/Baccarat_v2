@@ -157,20 +157,42 @@ class EnhancedWLPredictionWidget(QWidget):
             horizontal_pred (str): Yatay tahmin değeri ('W', 'L' veya '?').
             vertical_pred (str): Dikey tahmin değeri ('W', 'L' veya '?').
             reverse_bet (bool): Ters bahis yapılıp yapılmayacağı.
-            h_accuracy (float): Yatay tahmin doğruluk oranı.
-            v_accuracy (float): Dikey tahmin doğruluk oranı.
+            h_accuracy (float/dict): Yatay tahmin doğruluk oranı veya istatistik sözlüğü.
+            v_accuracy (float/dict): Dikey tahmin doğruluk oranı veya istatistik sözlüğü.
         """
         # Tahmin etiketlerini güncelle
         self.h_prediction.setText(horizontal_pred)
         self.v_prediction.setText(vertical_pred)
         self.f_prediction.setText(final_prediction)
         
-        # Doğruluk oranlarını güncelle
+        # Doğruluk oranlarını güncelle - burada son tahminlerin doğruluk oranlarını kullan
         if h_accuracy is not None:
-            self.h_accuracy.setText(f"{h_accuracy:.1f}%")
+            if isinstance(h_accuracy, dict) and 'recent_horizontal_accuracy' in h_accuracy:
+                # Son tahminlerin başarı oranı mevcutsa onu kullan
+                self.h_accuracy.setText(f"{h_accuracy['recent_horizontal_accuracy']:.1f}%")
+                # Metin rengini başarı oranına göre ayarla
+                if h_accuracy['recent_horizontal_accuracy'] >= 60:
+                    self.h_accuracy.setStyleSheet("QLabel { color: #28a745; font-weight: bold; }")
+                elif h_accuracy['recent_horizontal_accuracy'] <= 40:
+                    self.h_accuracy.setStyleSheet("QLabel { color: #dc3545; font-weight: bold; }")
+                else:
+                    self.h_accuracy.setStyleSheet("QLabel { color: #ffc107; font-weight: bold; }")
+            else:
+                self.h_accuracy.setText(f"{h_accuracy:.1f}%")
         
         if v_accuracy is not None:
-            self.v_accuracy.setText(f"{v_accuracy:.1f}%")
+            if isinstance(v_accuracy, dict) and 'recent_vertical_accuracy' in v_accuracy:
+                # Son tahminlerin başarı oranı mevcutsa onu kullan
+                self.v_accuracy.setText(f"{v_accuracy['recent_vertical_accuracy']:.1f}%")
+                # Metin rengini başarı oranına göre ayarla
+                if v_accuracy['recent_vertical_accuracy'] >= 60:
+                    self.v_accuracy.setStyleSheet("QLabel { color: #28a745; font-weight: bold; }")
+                elif v_accuracy['recent_vertical_accuracy'] <= 40:
+                    self.v_accuracy.setStyleSheet("QLabel { color: #dc3545; font-weight: bold; }")
+                else:
+                    self.v_accuracy.setStyleSheet("QLabel { color: #ffc107; font-weight: bold; }")
+            else:
+                self.v_accuracy.setText(f"{v_accuracy:.1f}%")
         
         # Stilleri uygula
         self._set_prediction_style(self.h_prediction, horizontal_pred)

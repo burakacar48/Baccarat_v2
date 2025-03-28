@@ -259,10 +259,20 @@ class LeftPanel(QWidget):
             reverse_bet (bool): Ters bahis yapılıp yapılmayacağı.
             h_pred (str): Yatay WL tahmin değeri.
             v_pred (str): Dikey WL tahmin değeri.
-            h_accuracy (float): Yatay tahmin doğruluk oranı.
-            v_accuracy (float): Dikey tahmin doğruluk oranı.
+            h_accuracy (float/dict): Yatay tahmin doğruluk oranı veya istatistik sözlüğü.
+            v_accuracy (float/dict): Dikey tahmin doğruluk oranı veya istatistik sözlüğü.
         """
         self.prediction_label.update_prediction(prediction)
+        
+        # Son tahminlerin başarı oranlarını kullan (eğer istatistik sözlüğü verilmişse)
+        recent_h_accuracy = h_accuracy
+        recent_v_accuracy = v_accuracy
+        
+        if isinstance(h_accuracy, dict) and 'recent_horizontal_accuracy' in h_accuracy:
+            recent_h_accuracy = h_accuracy['recent_horizontal_accuracy']
+        
+        if isinstance(v_accuracy, dict) and 'recent_vertical_accuracy' in v_accuracy:
+            recent_v_accuracy = v_accuracy['recent_vertical_accuracy']
         
         # Geliştirilmiş WL tahmin widgetini güncelle
         self.wl_prediction_widget.update_prediction(
@@ -270,6 +280,6 @@ class LeftPanel(QWidget):
             h_pred, 
             v_pred, 
             reverse_bet,
-            h_accuracy,
-            v_accuracy
+            recent_h_accuracy if recent_h_accuracy is not None else h_accuracy,
+            recent_v_accuracy if recent_v_accuracy is not None else v_accuracy
         )

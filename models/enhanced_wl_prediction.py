@@ -2,7 +2,7 @@
 Geliştirilmiş Win/Loss pattern prediction module.
 Bu modül hem yatay hem de dikey win/loss desenlerini analiz ederek daha başarılı tahminler üretir.
 """
-from collections import Counter
+from collections import Counter, deque
 
 class EnhancedWLPredictionModel:
     """Yatay ve dikey win/loss desenlerini analiz eden tahmin modeli."""
@@ -21,6 +21,17 @@ class EnhancedWLPredictionModel:
         self.vertical_weight = 0.4    # Dikey tahmin ağırlığı
         self.last_horizontal_pred = '?'
         self.last_vertical_pred = '?'
+        
+        # Son tahminlerin sonuçlarını tutmak için kuyruklar (son 20 tahmin)
+        self.horizontal_results = deque(maxlen=20)
+        self.vertical_results = deque(maxlen=20)
+        
+        # Tahmin tiplerine göre başarı sayaçları
+        self.pattern_type_successes = {
+            "streak": {"horizontal": 0, "vertical": 0, "total": 0},
+            "alternating": {"horizontal": 0, "vertical": 0, "total": 0},
+            "mixed": {"horizontal": 0, "vertical": 0, "total": 0}
+        }
         
     def predict_horizontal(self, wl_history):
         """
@@ -72,9 +83,9 @@ class EnhancedWLPredictionModel:
         if best_prediction == '?' or highest_count <= 1:
             # Son sonucun tersini tahmin et
             if len(last_pair) > 1:
-                return 'W' if last_pair[-1] == 'L' else 'L'
+                best_prediction = 'W' if last_pair[-1] == 'L' else 'L'
             elif len(wl_history) > 0:
-                return 'W' if wl_history[-1] == 'L' else 'L'
+                best_prediction = 'W' if wl_history[-1] == 'L' else 'L'
         
         # Son yatay tahmini sakla
         self.last_horizontal_pred = best_prediction
@@ -123,6 +134,16 @@ class EnhancedWLPredictionModel:
         predictions = []
         for col in column_patterns:
             if len(col) >= 3:
+                # Son 3 eleman ile 4'lü gruplar için tahminler yapalım (genişletilmiş analiz)
+                if len(col) >= 4:
+                    last_four = col[-4:]
+                    # 4'lü özel desenler
+                    if last_four == ['W', 'L', 'W', 'L']:
+                        predictions.append('W')  # WLWL -> W
+                    elif last_four == ['L', 'W', 'L', 'W']:
+                        predictions.append('L')  # LWLW -> L
+                
+                # Orijinal 3'lü analiz
                 last_three = col[-3:]
                 
                 # Tüm elemanlar aynıysa tersini tahmin et
@@ -156,6 +177,34 @@ class EnhancedWLPredictionModel:
         self.last_vertical_pred = result
         return result
     
+    def _classify_pattern(self, wl_history):
+        """
+        Mevcut WL dizisinin desen türünü sınıflandırır.
+        
+        Args:
+            wl_history (list): 'W' ve 'L' değerlerinden oluşan kazanç/kayıp geçmişi.
+            
+        Returns:
+            str: "streak", "alternating" veya "mixed"
+        """
+        if len(wl_history) < 4:
+            return "mixed"
+            
+        # Son 4 elemana bakalım
+        last_four = wl_history[-4:]
+        
+        # Streak (WWWW veya LLLL)
+        if all(x == 'W' for x in last_four) or all(x == 'L' for x in last_four):
+            return "streak"
+            
+        # Alternating (WLWL veya LWLW)
+        if (last_four == ['W', 'L', 'W', 'L'] or 
+            last_four == ['L', 'W', 'L', 'W']):
+            return "alternating"
+            
+        # Diğer tüm durumlar
+        return "mixed"
+    
     def predict(self, wl_history):
         """
         Hem yatay hem dikey desenleri analiz ederek ağırlıklı bir tahmin yapar.
@@ -179,8 +228,30 @@ class EnhancedWLPredictionModel:
         if horizontal_pred == vertical_pred:
             return horizontal_pred
         
-        # Eğer farklıysa, ağırlıklı seçim yap (son sonuçlardaki başarı oranlarına göre ayarlanabilir)
-        # Bu uygulama, sabit ağırlıklar yerine dinamik olarak uyarlanabilir
+        # Desen türünü belirle
+        pattern_type = self._classify_pattern(wl_history)
+        
+        # Desen türüne göre ağırlıklandırma yap
+        if pattern_type in self.pattern_type_successes:
+            type_stats = self.pattern_type_successes[pattern_type]
+            if type_stats["total"] > 0:
+                # Desen türüne özgü başarı oranlarına göre ağırlıkları belirle
+                h_success_rate = type_stats["horizontal"] / type_stats["total"] if type_stats["total"] > 0 else 0.5
+                v_success_rate = type_stats["vertical"] / type_stats["total"] if type_stats["total"] > 0 else 0.5
+                
+                # Minimum 0.2 başarı oranı garantisi
+                h_success_rate = max(0.2, h_success_rate)
+                v_success_rate = max(0.2, v_success_rate)
+                
+                # Başarı oranlarını normalize et
+                total_rate = h_success_rate + v_success_rate
+                h_weight = h_success_rate / total_rate if total_rate > 0 else 0.5
+                v_weight = v_success_rate / total_rate if total_rate > 0 else 0.5
+                
+                # Desen türüne özgü ağırlıklandırma kullan
+                return horizontal_pred if h_weight > v_weight else vertical_pred
+        
+        # Varsayılan olarak genel ağırlıkları kullan
         if self.horizontal_weight > self.vertical_weight:
             return horizontal_pred
         else:
@@ -207,19 +278,62 @@ class EnhancedWLPredictionModel:
         
         return should_reverse, predicted_wl, self.last_horizontal_pred, self.last_vertical_pred
     
-    def update_weights(self, horizontal_success, vertical_success):
+    def update_weights(self, horizontal_success, vertical_success, momentum=0.7):
         """
-        Tahmin ağırlıklarını başarı oranlarına göre günceller.
+        Tahmin ağırlıklarını başarı oranlarına göre günceller, momentum faktörü ile.
         
         Args:
             horizontal_success (float): Yatay tahmin başarı oranı (0-1 arasında).
             vertical_success (float): Dikey tahmin başarı oranı (0-1 arasında).
+            momentum (float): Önceki değerlerin ağırlığı (0-1 arasında).
         """
         total = horizontal_success + vertical_success
         if total > 0:
-            self.horizontal_weight = horizontal_success / total
-            self.vertical_weight = vertical_success / total
+            new_h_weight = horizontal_success / total
+            new_v_weight = vertical_success / total
+            
+            # Momentum faktörü ile güncelleme
+            self.horizontal_weight = (momentum * self.horizontal_weight) + ((1-momentum) * new_h_weight)
+            self.vertical_weight = (momentum * self.vertical_weight) + ((1-momentum) * new_v_weight)
+            
+            # Değerleri normalize et (toplamları 1.0 olmalı)
+            total_weight = self.horizontal_weight + self.vertical_weight
+            self.horizontal_weight /= total_weight
+            self.vertical_weight /= total_weight
         else:
             # Veri yoksa varsayılan ağırlıklara dön
             self.horizontal_weight = 0.6
             self.vertical_weight = 0.4
+    
+    def record_prediction_result(self, is_horizontal_correct, is_vertical_correct, pattern_type=None):
+        """
+        Bir tahmin sonucunu kaydeder ve istatistikleri günceller.
+        
+        Args:
+            is_horizontal_correct (bool): Yatay tahmin doğru muydu?
+            is_vertical_correct (bool): Dikey tahmin doğru muydu?
+            pattern_type (str, optional): Tahmin edilen desen türü.
+        """
+        # Son sonuçları güncelle
+        self.horizontal_results.append(1 if is_horizontal_correct else 0)
+        self.vertical_results.append(1 if is_vertical_correct else 0)
+        
+        # Desen türüne göre başarı istatistiklerini güncelle
+        if pattern_type in self.pattern_type_successes:
+            stats = self.pattern_type_successes[pattern_type]
+            stats["total"] += 1
+            if is_horizontal_correct:
+                stats["horizontal"] += 1
+            if is_vertical_correct:
+                stats["vertical"] += 1
+    
+    def get_recent_success_rates(self):
+        """
+        Son tahminlerin başarı oranlarını hesaplar.
+        
+        Returns:
+            tuple: (horizontal_rate, vertical_rate) - Son tahminlerin başarı oranları.
+        """
+        h_rate = sum(self.horizontal_results) / len(self.horizontal_results) if self.horizontal_results else 0.5
+        v_rate = sum(self.vertical_results) / len(self.vertical_results) if self.vertical_results else 0.5
+        return h_rate, v_rate
