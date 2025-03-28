@@ -363,10 +363,17 @@ class MainWindow(QMainWindow):
         # Simülasyonu durdur
         if self.simulation_running:
             self.simulation_timer.stop()
-            
+        
         print("Uygulama kapanıyor, DB buffer flush ediliyor...")
         self.flush_db_buffer()
+        
+        # Adaptif model kaynaklarını serbest bırak
+        if hasattr(self, 'prediction_model') and self.prediction_model:
+            self.prediction_model.close()
+        
+        # Veritabanı bağlantısını kapat
         if self.db_manager:
             self.db_manager.close()
             print("Veritabanı bağlantısı kapatıldı.")
+        
         super().closeEvent(event)

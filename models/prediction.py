@@ -2,6 +2,7 @@
 Tahmin algoritmalarını ve model istatistiklerini içeren modül.
 """
 from config import GRID_SIZE
+from models.adaptive_learning import AdaptiveLearningModel  # Yeni eklediğimiz modül
 
 class PredictionModel:
     """Tahmin modellerini ve ilgili istatistikleri yöneten sınıf."""
@@ -12,6 +13,7 @@ class PredictionModel:
             grid_data (list, optional): Grid verileri için referans.
         """
         self.grid_data = grid_data if grid_data else [[None for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+        self.adaptive_model = AdaptiveLearningModel()  # Yeni adaptif öğrenme modeli
         self.models = self._initialize_models()
     
     def _initialize_models(self):
@@ -29,6 +31,8 @@ class PredictionModel:
             {'name': 'Grid 2x2', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': self.predict_grid_pattern_2x2},
             {'name': 'Grid 3x3', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': self.predict_grid_pattern_3x3},
             {'name': 'Veritabanı', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': None},  # DB tahmin işlevi dışarıdan atanacak
+            {'name': 'Adaptif Öğr.', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': self.predict_adaptive},  # Yeni model
+            {'name': 'Grid Adaptif', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': self.predict_grid_adaptive},  # Yeni grid tabanlı adaptif model
         ]
     
     def set_db_prediction_function(self, db_predict_func):
@@ -59,6 +63,9 @@ class PredictionModel:
         Returns:
             dict: Model adı-tahmin çiftlerini içeren sözlük.
         """
+        # Geçmiş kopyasını saklayalım (adaptif model için kullanacağız)
+        self.history_snapshot = history.copy()
+        
         predictions = {}
         for model in self.models:
             if model['predict_func']:
@@ -103,11 +110,35 @@ class PredictionModel:
                 model['total'] += 1
                 if model_pred == winner:
                     model['wins'] += 1
+                else:
+                    # Adaptif model için hatalı tahmini kaydet
+                    if model['name'] == 'Adaptif Öğr.':
+                        self.adaptive_model.update_from_result(
+                            self.history_snapshot.copy() if hasattr(self, 'history_snapshot') else [], 
+                            model_pred, 
+                            winner
+                        )
+                    # Grid Adaptif model için hatalı tahmini kaydet
+                    elif model['name'] == 'Grid Adaptif' and self.grid_data:
+                        for size in [3, 4, 5]:  # 3x3, 4x4, 5x5 grid desenleri
+                            self.adaptive_model.record_grid_mistake(
+                                self.grid_data,
+                                size,
+                                model_pred
+                            )
+                
                 model['accuracy'] = (model['wins'] / model['total'] * 100) if model['total'] > 0 else 0.0
     
     def reset_models(self):
         """Model istatistiklerini sıfırlar."""
         self.models = self._initialize_models()
+        if hasattr(self, 'adaptive_model'):
+            self.adaptive_model.clear_memory()
+    
+    def close(self):
+        """Kaynakları serbest bırakır."""
+        if hasattr(self, 'adaptive_model'):
+            self.adaptive_model.close()
     
     # Tahmin algoritmaları
     def predict_follow_last(self, current_history):
@@ -224,3 +255,37 @@ class PredictionModel:
         """
         pattern = self._check_grid_square(3)
         return pattern if pattern else '?'
+    
+    def predict_adaptive(self, current_history):
+        """Adaptif öğrenme modelinden tahmin alır.
+        
+        Args:
+            current_history (list): Oyun geçmişi.
+            
+        Returns:
+            str: Tahmin ('P', 'B' veya '?').
+        """
+        return self.adaptive_model.predict(current_history)
+    
+    def predict_grid_adaptive(self, current_history):
+        """Grid tabanlı adaptif öğrenme modelinden tahmin alır.
+        
+        Args:
+            current_history (list): Oyun geçmişi.
+            
+        Returns:
+            str: Tahmin ('P', 'B' veya '?').
+        """
+        # Önce 3x3 deseni dene
+        pred_3x3 = self.adaptive_model.predict_from_grid(self.grid_data, 3)
+        if pred_3x3 != '?':
+            return pred_3x3
+            
+        # Sonra 4x4 ve 5x5 dene
+        for size in [4, 5]:
+            pred = self.adaptive_model.predict_from_grid(self.grid_data, size)
+            if pred != '?':
+                return pred
+        
+        # Grid desenine dayalı tahmin yoksa adaptif model kullan
+        return self.adaptive_model.predict(current_history)
