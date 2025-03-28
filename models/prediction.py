@@ -232,6 +232,94 @@ class PredictionModel:
         except IndexError:
             return None
     
+    def _check_grid_pattern(self, size):
+        """Esnek grid desen algılama.
+        
+        Args:
+            size (int): Kare boyutu.
+            
+        Returns:
+            str: Çoğunluk değeri ('P', 'B' veya None).
+        """
+        start_row = GRID_SIZE - size
+        start_col = GRID_SIZE - size
+        
+        if start_row < 0 or start_col < 0:
+            return None
+        
+        # Desenin kaç P ve B içerdiğini say
+        p_count = 0
+        b_count = 0
+        empty_count = 0
+        
+        for r in range(start_row, GRID_SIZE):
+            for c in range(start_col, GRID_SIZE):
+                if r >= len(self.grid_data) or c >= len(self.grid_data[r]):
+                    return None
+                    
+                val = self.grid_data[r][c]
+                if val == 'P':
+                    p_count += 1
+                elif val == 'B':
+                    b_count += 1
+                else:
+                    empty_count += 1
+        
+        # Eğer boş hücre yoksa ve bir değer baskınsa
+        total_cells = size * size
+        threshold = total_cells * 0.75  # %75 eşik değeri
+        
+        if empty_count == 0:
+            if p_count >= threshold:
+                return 'P'
+            elif b_count >= threshold:
+                return 'B'
+        
+        return None
+    
+    def _check_line_pattern(self, length):
+        """Yatay ve dikey çizgilerde desen arar.
+        
+        Args:
+            length (int): Çizgi uzunluğu.
+            
+        Returns:
+            str: Çizgi değeri ('P', 'B' veya None).
+        """
+        # Yatay çizgileri kontrol et
+        for r in range(GRID_SIZE):
+            for c in range(GRID_SIZE - length + 1):
+                first_val = self.grid_data[r][c]
+                if first_val is None:
+                    continue
+                    
+                all_same = True
+                for i in range(1, length):
+                    if self.grid_data[r][c+i] != first_val:
+                        all_same = False
+                        break
+                
+                if all_same:
+                    return first_val
+        
+        # Dikey çizgileri kontrol et
+        for c in range(GRID_SIZE):
+            for r in range(GRID_SIZE - length + 1):
+                first_val = self.grid_data[r][c]
+                if first_val is None:
+                    continue
+                    
+                all_same = True
+                for i in range(1, length):
+                    if self.grid_data[r+i][c] != first_val:
+                        all_same = False
+                        break
+                
+                if all_same:
+                    return first_val
+        
+        return None
+    
     def predict_grid_pattern_2x2(self, current_history):
         """2x2 grid deseni tahmini.
         
@@ -253,8 +341,22 @@ class PredictionModel:
         Returns:
             str: Tahmin ('P', 'B' veya '?').
         """
+        # Sıkı kare desen kontrolü
         pattern = self._check_grid_square(3)
-        return pattern if pattern else '?'
+        if pattern:
+            return 'B' if pattern == 'P' else 'P'  # Tersini tahmin et
+            
+        # Esnek desen kontrolü
+        flexible_pattern = self._check_grid_pattern(3)
+        if flexible_pattern:
+            return 'B' if flexible_pattern == 'P' else 'P'  # Tersini tahmin et
+            
+        # Çizgi desen kontrolü
+        line_pattern = self._check_line_pattern(4)  # 4 uzunluğunda çizgi
+        if line_pattern:
+            return 'B' if line_pattern == 'P' else 'P'  # Tersini tahmin et
+        
+        return '?'
     
     def predict_adaptive(self, current_history):
         """Adaptif öğrenme modelinden tahmin alır.
