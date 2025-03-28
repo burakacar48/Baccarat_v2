@@ -12,8 +12,8 @@ from ui.panels.left_panel import LeftPanel
 from ui.panels.right_panel import RightPanel
 from ui.dialogs.model_details import ModelDetailsWindow
 
-# Import the baccarat simulator - only get_next_result is needed
-from baccarat_simulator import get_next_result
+# Import the baccarat simulator
+from baccarat_simulator import get_next_result, is_new_shoe_detected
 
 # Geçici stil fonksiyonları
 def get_modern_font():
@@ -168,6 +168,23 @@ class MainWindow(QMainWindow):
         # Sonucu kaydet
         result_info = self.game_history.add_result(winner, is_win)
         
+        # Yeni ayakkabı başlayıp başlamadığını kontrol et
+        # Direkt baccarat_simulator'dan yeni shoe durumunu kontrol et
+        new_shoe_detected = is_new_shoe_detected()
+        
+        if new_shoe_detected:
+            print("Manuel girişte yeni shoe tespit edildi!")
+            # Yeni shoe başladığında veritabanını da bilgilendir
+            if self.db_manager:
+                self.db_manager.new_shoe_detected()
+                
+            # Adaptif modeli de bilgilendir
+            if hasattr(self.prediction_model, 'set_current_shoe_id'):
+                self.prediction_model.set_current_shoe_id(self.db_manager.current_shoe_id)
+            
+            # Simülasyon için bahis yapma modunu sıfırla
+            self.pause_simulation = False
+        
         # Veritabanına ekle
         self.db_manager.add_result(winner)
         
@@ -219,7 +236,7 @@ class MainWindow(QMainWindow):
             self.left_panel.action_buttons["simulate"].setToolTip("Simülasyonu Durdur")
             # Pause durumunu sıfırla, kullanıcı başlattığında her zaman baştan bahis yapmasını sağlar
             self.pause_simulation = False
-            print("Simülasyon başlatıldı.")
+            print("Simülasyon başlatıldı, bahis yapma modu etkin.")
     
     def undo_last_action(self):
         """Son eklenen sonucu geri alır."""
@@ -241,6 +258,11 @@ class MainWindow(QMainWindow):
         if confirm == QMessageBox.StandardButton.Yes:
             self.game_history.clear_histories()
             self.prediction_model.reset_models()
+            
+            # Mevcut shoe veritabanı verilerini temizle
+            if self.db_manager:
+                self.db_manager.clear_current_shoe_data()
+                
             # Simülasyon değişkenlerini sıfırla
             self.current_hand_in_shoe = 0
             self.pause_simulation = False
@@ -259,6 +281,15 @@ class MainWindow(QMainWindow):
         if confirm == QMessageBox.StandardButton.Yes:
             self.game_history.reset()
             self.prediction_model.reset_models()
+            
+            # Tüm veritabanı verilerini temizle
+            if self.db_manager:
+                self.db_manager.clear_table()
+                
+            # Adaptif model için de shoe ID'yi sıfırla
+            if hasattr(self.prediction_model, 'set_current_shoe_id'):
+                self.prediction_model.set_current_shoe_id(1)
+                
             # Simülasyon değişkenlerini sıfırla
             self.current_hand_in_shoe = 0
             self.pause_simulation = False
@@ -270,27 +301,33 @@ class MainWindow(QMainWindow):
         # Use the enhanced baccarat simulator
         winner = get_next_result()  # This will return 'P' or 'B' according to proper baccarat rules
         
-        # Shoe değişimini kontrol et
-        new_shoe_detected = getattr(self.game_history, 'new_shoe_detected', False)
+        # Shoe değişimini kontrol et - doğrudan baccarat_simulator'dan sorgula
+        new_shoe_detected = is_new_shoe_detected()
+        
         if new_shoe_detected:
+            print("Simülasyonda yeni shoe tespit edildi! Bahis yapma modu etkinleştiriliyor.")
+            # Yeni shoe başladığında veritabanını da bilgilendir
+            if self.db_manager:
+                self.db_manager.new_shoe_detected()
+                
+            # Adaptif modeli de bilgilendir
+            if hasattr(self.prediction_model, 'set_current_shoe_id'):
+                self.prediction_model.set_current_shoe_id(self.db_manager.current_shoe_id)
+            
             # Yeni shoe başladığında geçmiş verileri temizle
             self.game_history.clear_histories()
             self.current_hand_in_shoe = 0
+            
+            # Yeni shoe'da her zaman bahis yapmalıyız
             self.pause_simulation = False
-            print("Yeni shoe başladı, geçmiş temizlendi, simülasyon devam ediyor.")
+            print("Yeni shoe başladı, geçmiş temizlendi, simülasyon bahis yaparak devam ediyor.")
         
         # El sayısını arttır
         self.current_hand_in_shoe += 1
         
-        # Mevcut tahmini al
-        current_prediction = self.get_current_prediction()
-        
-        # Tahmini kontrol et ve kazanıp kazanmadığını belirle
-        is_win = None
-        
-        # 35. elden sonra kazanç durumunda bahis yapmayı durdur (simülasyon devam eder)
-        if self.pause_simulation and not new_shoe_detected:
-            # Sonucu griddeki geçmişe ekle ama bahis yapma
+        # Bahis yapılıp yapılmayacağını belirle
+        if self.pause_simulation:
+            # Bahis yapmadan devam et
             self.game_history.history.append(winner)
             self.game_history._rebuild_grid_from_history()
             # Veritabanına ekle
@@ -299,7 +336,12 @@ class MainWindow(QMainWindow):
             self._full_ui_update()
             print(f"Simülasyon: El #{self.current_hand_in_shoe} - Sonuç: {winner} - Bahis yapılmıyor (izleme modu)")
         else:
-            # Normal şekilde bahis yaparak sonucu ekle
+            # Bahis yaparak devam et
+            # Mevcut tahmini al
+            current_prediction = self.get_current_prediction()
+            
+            # Tahmini kontrol et ve kazanıp kazanmadığını belirle
+            is_win = None
             if current_prediction not in ['?', None]:
                 is_win = (current_prediction == winner)
             
@@ -376,4 +418,4 @@ class MainWindow(QMainWindow):
             self.db_manager.close()
             print("Veritabanı bağlantısı kapatıldı.")
         
-        super().closeEvent(event)
+        super().closeEvent

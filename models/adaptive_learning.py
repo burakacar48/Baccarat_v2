@@ -1,7 +1,8 @@
 """
-Hatalı tahminlerden öğrenen adaptif tahmin modeli.
-Bu modül, önceki tahmin hatalarını kaydederek daha iyi tahminler yapmayı amaçlar.
+AdaptiveLearningModel için shoe takibi iyileştirmesi.
+Bu değişiklikler, farklı shoe'larda yapılan hataları ayrı şekilde izleyecektir.
 """
+
 import sqlite3
 from collections import Counter, defaultdict
 from config import DB_FILE
@@ -16,6 +17,7 @@ class AdaptiveLearningModel:
         """
         self.lookback = lookback
         self.connection = None
+        self.current_shoe_id = 1
         self._initialize_database()
         self.mistake_memory = defaultdict(Counter)  # Hataları saklayacak hafıza yapısı
         self._load_mistake_memory()
@@ -26,33 +28,35 @@ class AdaptiveLearningModel:
             self.connection = sqlite3.connect(DB_FILE)
             cursor = self.connection.cursor()
             
-            # Tahmin hafızası tablosu
+            # Tahmin hafızası tablosu - shoe_id eklenmiş
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS adaptive_learning (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    shoe_id INTEGER NOT NULL,
                     pattern TEXT NOT NULL,
                     wrong_prediction TEXT NOT NULL,
                     frequency INTEGER DEFAULT 1,
-                    UNIQUE(pattern, wrong_prediction)
+                    UNIQUE(shoe_id, pattern, wrong_prediction)
                 )
             ''')
             
-            # Grid tabanlı hata desenler tablosu
+            # Grid tabanlı hata desenler tablosu - shoe_id eklenmiş
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS grid_mistake_patterns (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    shoe_id INTEGER NOT NULL,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                     grid_pattern TEXT NOT NULL,   
                     grid_size INTEGER NOT NULL,   
                     wrong_prediction TEXT NOT NULL,
                     frequency INTEGER DEFAULT 1,
-                    UNIQUE(grid_pattern, grid_size, wrong_prediction)
+                    UNIQUE(shoe_id, grid_pattern, grid_size, wrong_prediction)
                 )
             ''')
             
             # İndeksler
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_pattern ON adaptive_learning(pattern)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_grid_pattern ON grid_mistake_patterns(grid_pattern, grid_size)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_pattern ON adaptive_learning(shoe_id, pattern)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_grid_pattern ON grid_mistake_patterns(shoe_id, grid_pattern, grid_size)')
             
             self.connection.commit()
             print("Adaptif öğrenme tablosu başarıyla başlatıldı.")
@@ -67,15 +71,43 @@ class AdaptiveLearningModel:
             
         try:
             cursor = self.connection.cursor()
-            cursor.execute("SELECT pattern, wrong_prediction, frequency FROM adaptive_learning")
+            
+            # Mevcut shoe_id değerini veritabanından al
+            cursor.execute("SELECT MAX(shoe_id) FROM shoe_tracker")
+            result = cursor.fetchone()
+            if result and result[0] is not None:
+                self.current_shoe_id = result[0]
+            
+            # Mevcut shoe için hata kayıtlarını yükle
+            cursor.execute("""
+                SELECT pattern, wrong_prediction, frequency 
+                FROM adaptive_learning
+                WHERE shoe_id = ?
+            """, (self.current_shoe_id,))
+            
             results = cursor.fetchall()
             
             for pattern, wrong_pred, freq in results:
                 self.mistake_memory[pattern][wrong_pred] = freq
                 
-            print(f"{len(results)} hata kaydı hafızaya yüklendi.")
+            print(f"Shoe ID {self.current_shoe_id} için {len(results)} hata kaydı hafızaya yüklendi.")
         except sqlite3.Error as e:
             print(f"Hata hafızası yükleme hatası: {e}")
+    
+    def set_shoe_id(self, shoe_id):
+        """Mevcut shoe ID'sini ayarlar ve hafızayı yeniden yükler.
+        
+        Args:
+            shoe_id (int): Yeni shoe ID'si.
+        """
+        if self.current_shoe_id == shoe_id:
+            return  # Değişiklik yok, işlem yapma
+            
+        self.current_shoe_id = shoe_id
+        # Hafızayı temizle ve yeni shoe için hafızayı yükle
+        self.mistake_memory.clear()
+        self._load_mistake_memory()
+        print(f"Adaptif öğrenme modeli için shoe ID {shoe_id} olarak ayarlandı.")
     
     def predict(self, history):
         """Mevcut durum için tahmin üretir.
@@ -123,11 +155,11 @@ class AdaptiveLearningModel:
             
             # Varsa güncelle, yoksa ekle
             cursor.execute("""
-                INSERT INTO adaptive_learning (pattern, wrong_prediction, frequency)
-                VALUES (?, ?, 1)
-                ON CONFLICT(pattern, wrong_prediction) 
+                INSERT INTO adaptive_learning (shoe_id, pattern, wrong_prediction, frequency)
+                VALUES (?, ?, ?, 1)
+                ON CONFLICT(shoe_id, pattern, wrong_prediction) 
                 DO UPDATE SET frequency = frequency + 1
-            """, (pattern, wrong_prediction))
+            """, (self.current_shoe_id, pattern, wrong_prediction))
             
             self.connection.commit()
         except sqlite3.Error as e:
@@ -168,11 +200,12 @@ class AdaptiveLearningModel:
             
             # Varsa güncelle, yoksa ekle
             cursor.execute("""
-                INSERT INTO grid_mistake_patterns (grid_pattern, grid_size, wrong_prediction, frequency)
-                VALUES (?, ?, ?, 1)
-                ON CONFLICT(grid_pattern, grid_size, wrong_prediction) 
+                INSERT INTO grid_mistake_patterns 
+                (shoe_id, grid_pattern, grid_size, wrong_prediction, frequency)
+                VALUES (?, ?, ?, ?, 1)
+                ON CONFLICT(shoe_id, grid_pattern, grid_size, wrong_prediction) 
                 DO UPDATE SET frequency = frequency + 1
-            """, (pattern, grid_size, wrong_prediction))
+            """, (self.current_shoe_id, pattern, grid_size, wrong_prediction))
             
             self.connection.commit()
         except sqlite3.Error as e:
@@ -224,11 +257,11 @@ class AdaptiveLearningModel:
             cursor.execute("""
                 SELECT wrong_prediction, SUM(frequency) as total_freq
                 FROM grid_mistake_patterns
-                WHERE grid_pattern = ? AND grid_size = ?
+                WHERE shoe_id = ? AND grid_pattern = ? AND grid_size = ?
                 GROUP BY wrong_prediction
                 ORDER BY total_freq DESC
                 LIMIT 1
-            """, (pattern, grid_size))
+            """, (self.current_shoe_id, pattern, grid_size))
             
             result = cursor.fetchone()
             if result:
@@ -250,10 +283,11 @@ class AdaptiveLearningModel:
             
         try:
             cursor = self.connection.cursor()
-            cursor.execute("DELETE FROM adaptive_learning")
-            cursor.execute("DELETE FROM grid_mistake_patterns")
+            # Sadece mevcut shoe için temizle
+            cursor.execute("DELETE FROM adaptive_learning WHERE shoe_id = ?", (self.current_shoe_id,))
+            cursor.execute("DELETE FROM grid_mistake_patterns WHERE shoe_id = ?", (self.current_shoe_id,))
             self.connection.commit()
-            print("Adaptif öğrenme hafızası temizlendi.")
+            print(f"Shoe ID {self.current_shoe_id} için adaptif öğrenme hafızası temizlendi.")
         except sqlite3.Error as e:
             print(f"Hafıza temizleme hatası: {e}")
     
