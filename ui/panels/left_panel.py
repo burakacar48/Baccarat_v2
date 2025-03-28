@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
 )
 from config import UNDO_EMOJI, CLEAR_EMOJI, RESET_EMOJI, SIMULATE_EMOJI, STATS_EMOJI, SIMULATE_MULTI_EMOJI
 from ui.widgets.prediction_view import PredictionLabel
+from ui.widgets.wl_prediction_view import WLPredictionWidget  # Yeni WL tahmin widgeti
 from PyQt6.QtCore import Qt
 
 class StatRowWidget(QWidget):
@@ -42,16 +43,28 @@ class KasaStatWidget(QWidget):
         self.win_streak_row = StatRowWidget("En Uzun W Serisi:", "WinStreakValueLabel")
         self.loss_streak_row = StatRowWidget("En Uzun L Serisi:", "LossStreakValueLabel")
         
+        # Yeni eklenen satırlar - WL tahmin sistemi performansı
+        self.wl_reverse_row = StatRowWidget("Ters Bahis Başarı:", "WLReverseValueLabel")
+        self.wl_normal_row = StatRowWidget("Normal Bahis Başarı:", "WLNormalValueLabel")
+        
         self.layout.addWidget(self.kasa_row)
         self.layout.addWidget(self.bet_row)
         self.layout.addWidget(self.win_streak_row)
         self.layout.addWidget(self.loss_streak_row)
+        self.layout.addWidget(self.wl_reverse_row)
+        self.layout.addWidget(self.wl_normal_row)
     
     def update_stats(self, stats):
         self.kasa_row.set_value(f"{stats['kasa']:,.2f} TL")
         self.bet_row.set_value(f"{stats['current_bet']:,.2f} TL")
         self.win_streak_row.set_value(str(stats['longest_win_streak']))
         self.loss_streak_row.set_value(str(stats['longest_loss_streak']))
+        
+        # WL tahmin performans verilerini güncelle
+        if 'reverse_accuracy' in stats:
+            self.wl_reverse_row.set_value(f"{stats['reverse_accuracy']:.1f}% ({stats['reverse_bet_wins']}/{stats['reverse_bet_count']})")
+        if 'normal_accuracy' in stats:
+            self.wl_normal_row.set_value(f"{stats['normal_accuracy']:.1f}% ({stats['normal_bet_wins']}/{stats['normal_bet_count']})")
 
 class TableStatWidget(QWidget):
     """Masa istatistiklerini gösteren basit widget."""
@@ -100,6 +113,7 @@ class LeftPanel(QWidget):
         self.banker_button = None
         self.kasa_widget = None
         self.prediction_label = None
+        self.wl_prediction_widget = None  # Yeni WL tahmin widgeti
         self.table_stat_widget = None
         self.action_buttons = {}
         
@@ -153,11 +167,15 @@ class LeftPanel(QWidget):
         """Tahmin gösterimi bölümünü oluşturur."""
         pred_group_box = QGroupBox("Sıradaki Tahmin")
         pred_layout = QVBoxLayout(pred_group_box)
-        pred_layout.setSpacing(5)
+        pred_layout.setSpacing(8)
         pred_layout.setContentsMargins(10, 10, 10, 10)
         
         self.prediction_label = PredictionLabel()
         pred_layout.addWidget(self.prediction_label)
+        
+        # WL tahmin widgeti oluştur ve ekle
+        self.wl_prediction_widget = WLPredictionWidget()
+        pred_layout.addWidget(self.wl_prediction_widget)
         
         self.layout.addWidget(pred_group_box)
     
@@ -220,10 +238,13 @@ class LeftPanel(QWidget):
         """
         self.table_stat_widget.update_stats(stats)
     
-    def update_prediction(self, prediction):
+    def update_prediction(self, prediction, wl_prediction='?', reverse_bet=False):
         """Tahmin gösterimini günceller.
         
         Args:
             prediction (str): Tahmin değeri ('P', 'B' veya '?').
+            wl_prediction (str): WL tahmin değeri ('W', 'L' veya '?').
+            reverse_bet (bool): Ters bahis yapılıp yapılmayacağı.
         """
         self.prediction_label.update_prediction(prediction)
+        self.wl_prediction_widget.update_prediction(wl_prediction, reverse_bet)

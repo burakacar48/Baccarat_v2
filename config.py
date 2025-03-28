@@ -7,7 +7,7 @@ from PyQt6.QtGui import QColor
 # --- Genel Ayarlar ---
 GRID_SIZE = 5
 CELL_SIZE = 60
-WINDOW_TITLE = "Modern Baccarat Analiz & Tahmin (Martingale+DB)"
+WINDOW_TITLE = "Modern Baccarat Analiz & Tahmin (Martingale+DB+WL Tahmin)"
 MAX_HISTORY_IN_GRID = GRID_SIZE * GRID_SIZE
 WL_GRID_ROWS = 12
 WL_GRID_COLS = 2

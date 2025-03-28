@@ -155,18 +155,21 @@ class MainWindow(QMainWindow):
             winner (str): Kazananı temsil eden 'P' veya 'B' değeri.
         """
         # Mevcut tahmini al
-        current_prediction = self.get_current_prediction()
+        current_prediction, should_reverse_bet = self.get_current_prediction()
         
         # Tüm modellerin tahminlerini topla
-        model_predictions = self.prediction_model.get_predictions(self.game_history.history)
+        model_predictions = self.prediction_model.get_predictions(
+            self.game_history.history, 
+            self.game_history.win_loss_history
+        )
         
         # Kazanç/kayıp durumunu belirle
         is_win = None
         if current_prediction not in ['?', None]:
             is_win = (current_prediction == winner)
         
-        # Sonucu kaydet
-        result_info = self.game_history.add_result(winner, is_win)
+        # Sonucu kaydet (reverse bet durumunu da belirt)
+        result_info = self.game_history.add_result(winner, is_win, should_reverse_bet)
         
         # Yeni ayakkabı başlayıp başlamadığını kontrol et
         # Direkt baccarat_simulator'dan yeni shoe durumunu kontrol et
@@ -198,22 +201,22 @@ class MainWindow(QMainWindow):
         if is_win is not None:
             result_str = "Kazandı!" if is_win else "Kaybetti!"
             bet_change_str = f"+{result_info['current_bet']:.2f}" if is_win else f"-{result_info['current_bet']:.2f}"
-            print(f"{result_str} {bet_change_str} TL. Yeni Kasa: {self.game_history.kasa:.2f}.")
+            bet_type_str = "Ters bahis" if should_reverse_bet else "Normal bahis"
+            print(f"{result_str} {bet_change_str} TL ({bet_type_str}). Yeni Kasa: {self.game_history.kasa:.2f}.")
     
     def get_current_prediction(self):
         """Mevcut tahmini döndürür.
         
         Returns:
-            str: Tahmin değeri ('P', 'B' veya '?').
+            tuple: (prediction, should_reverse_bet) - Tahmin değeri ('P', 'B' veya '?') ve ters bahis yapılıp yapılmayacağı.
         """
-        # Önce veritabanı modelini dene
-        db_pred = self.db_manager.predict_from_history(self.game_history.history)
+        # WL based prediction with possible reverse bet
+        prediction, should_reverse_bet = self.prediction_model.get_best_model_prediction(
+            self.game_history.history,
+            self.game_history.win_loss_history
+        )
         
-        # Veritabanı tahmini bulunamazsa, en iyi modeli kullan
-        if db_pred == '?':
-            return self.prediction_model.get_best_model_prediction(self.game_history.history)
-        
-        return db_pred
+        return prediction, should_reverse_bet
     
     def flush_db_buffer(self):
         """Veritabanı tamponunu temizler."""
@@ -337,8 +340,8 @@ class MainWindow(QMainWindow):
             print(f"Simülasyon: El #{self.current_hand_in_shoe} - Sonuç: {winner} - Bahis yapılmıyor (izleme modu)")
         else:
             # Bahis yaparak devam et
-            # Mevcut tahmini al
-            current_prediction = self.get_current_prediction()
+            # Mevcut tahmini al (ve ters bahis yapılıp yapılmayacağını)
+            current_prediction, should_reverse_bet = self.get_current_prediction()
             
             # Tahmini kontrol et ve kazanıp kazanmadığını belirle
             is_win = None
@@ -346,13 +349,16 @@ class MainWindow(QMainWindow):
                 is_win = (current_prediction == winner)
             
             # Sonucu ekle (bahisle birlikte)
-            result_info = self.game_history.add_result(winner, is_win)
+            result_info = self.game_history.add_result(winner, is_win, should_reverse_bet)
             
             # Veritabanına ekle
             self.db_manager.add_result(winner)
             
             # Tüm modellerin tahminlerini topla
-            model_predictions = self.prediction_model.get_predictions(self.game_history.history)
+            model_predictions = self.prediction_model.get_predictions(
+                self.game_history.history,
+                self.game_history.win_loss_history
+            )
             
             # Model doğruluk oranlarını güncelle
             self.prediction_model.update_model_accuracy(winner, model_predictions)
@@ -364,7 +370,8 @@ class MainWindow(QMainWindow):
             if is_win is not None:
                 result_str = "Kazandı!" if is_win else "Kaybetti!"
                 bet_change_str = f"+{result_info['current_bet']:.2f}" if is_win else f"-{result_info['current_bet']:.2f}"
-                print(f"Simülasyon: El #{self.current_hand_in_shoe} - Sonuç: {winner} - {result_str} {bet_change_str} TL. Yeni Kasa: {self.game_history.kasa:.2f}.")
+                bet_type_str = "Ters bahis" if should_reverse_bet else "Normal bahis"
+                print(f"Simülasyon: El #{self.current_hand_in_shoe} - Sonuç: {winner} - {result_str} {bet_change_str} TL ({bet_type_str}). Yeni Kasa: {self.game_history.kasa:.2f}.")
             
             # 35. elden sonra kazanç durumunda bahis duraklatılır
             if self.current_hand_in_shoe > 35 and is_win:
@@ -392,8 +399,9 @@ class MainWindow(QMainWindow):
         self.left_panel.update_table_stats(stats)
         
         # Tahmin gösterimini güncelle
-        current_prediction = self.get_current_prediction()
-        self.left_panel.update_prediction(current_prediction)
+        current_prediction, should_reverse_bet = self.get_current_prediction()
+        wl_prediction = self.prediction_model.current_wl_prediction
+        self.left_panel.update_prediction(current_prediction, wl_prediction, should_reverse_bet)
         
         # Sağ panel güncellemeleri
         self.right_panel.update_result_grid(self.game_history.grid_data)

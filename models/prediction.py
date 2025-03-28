@@ -3,6 +3,7 @@ Tahmin algoritmalarını ve model istatistiklerini içeren modül.
 """
 from config import GRID_SIZE
 from models.adaptive_learning import AdaptiveLearningModel  # Yeni eklediğimiz modül
+from models.wl_prediction import WLPredictionModel  # WL tahmin modeli
 
 class PredictionModel:
     """Tahmin modellerini ve ilgili istatistikleri yöneten sınıf."""
@@ -14,7 +15,10 @@ class PredictionModel:
         """
         self.grid_data = grid_data if grid_data else [[None for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
         self.adaptive_model = AdaptiveLearningModel()  # Yeni adaptif öğrenme modeli
+        self.wl_model = WLPredictionModel(lookback_pairs=5)  # WL tahmin modeli
         self.models = self._initialize_models()
+        self.current_wl_prediction = '?'  # WL tahmini için yeni değişken
+        self.should_reverse_bet = False  # Ters bahis yapma durumu
     
     def _initialize_models(self):
         """Tahmin modellerini başlatır.
@@ -33,6 +37,7 @@ class PredictionModel:
             {'name': 'Veritabanı', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': None},  # DB tahmin işlevi dışarıdan atanacak
             {'name': 'Adaptif Öğr.', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': self.predict_adaptive},  # Yeni model
             {'name': 'Grid Adaptif', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': self.predict_grid_adaptive},  # Yeni grid tabanlı adaptif model
+            {'name': 'WL Tersine', 'wins': 0, 'total': 0, 'accuracy': 0.0, 'predict_func': self.predict_wl_reverse},  # WL ters tahmin modeli
         ]
     
     def set_db_prediction_function(self, db_predict_func):
@@ -54,17 +59,24 @@ class PredictionModel:
         """
         self.grid_data = grid_data
     
-    def get_predictions(self, history):
+    def get_predictions(self, history, wl_history=None):
         """Tüm modeller için tahminleri döndürür.
         
         Args:
             history (list): Oyun geçmişi.
+            wl_history (list, optional): Kazanç/kayıp geçmişi.
             
         Returns:
             dict: Model adı-tahmin çiftlerini içeren sözlük.
         """
         # Geçmiş kopyasını saklayalım (adaptif model için kullanacağız)
         self.history_snapshot = history.copy()
+        
+        # WL tahmini yap
+        if wl_history:
+            should_reverse, wl_pred = self.wl_model.should_reverse_bet(wl_history, None)
+            self.should_reverse_bet = should_reverse
+            self.current_wl_prediction = wl_pred
         
         predictions = {}
         for model in self.models:
@@ -74,16 +86,47 @@ class PredictionModel:
                 predictions[model['name']] = '?'
         return predictions
     
-    def get_best_model_prediction(self, history, min_predictions=5):
+    def get_best_model_prediction(self, history, wl_history=None, min_predictions=5):
         """En yüksek doğruluk oranına sahip modelin tahminini döndürür.
         
         Args:
             history (list): Oyun geçmişi.
+            wl_history (list, optional): Kazanç/kayıp geçmişi.
             min_predictions (int, optional): Minimum tahmin sayısı.
             
         Returns:
-            str: Tahmin ('P', 'B' veya '?').
+            tuple: (tahmin, ters_bahis_yapılmalı) - Tahmin ('P', 'B' veya '?') ve ters bahis yapılıp yapılmayacağı.
         """
+        # WL tahmini güncelle
+        if wl_history:
+            best_model_pred = None
+            
+            # En iyi modeli bul
+            ranked_models = sorted(
+                [m for m in self.models if m['total'] >= min_predictions],
+                key=lambda m: m['accuracy'],
+                reverse=True
+            )
+            
+            if ranked_models:
+                best_model = ranked_models[0]
+                best_model_pred = best_model['predict_func'](history)
+            else:
+                # Yeterli veri yoksa varsayılan olarak son sonucu takip et
+                best_model_pred = self.predict_follow_last(history)
+            
+            should_reverse, wl_pred = self.wl_model.should_reverse_bet(wl_history, best_model_pred)
+            self.should_reverse_bet = should_reverse
+            self.current_wl_prediction = wl_pred
+            
+            # Ters bahis yapılacaksa tahminimizi tersine çevir
+            if should_reverse and best_model_pred != '?':
+                reversed_pred = 'P' if best_model_pred == 'B' else 'B'
+                return reversed_pred, True
+            
+            return best_model_pred, False
+        
+        # WL geçmişi yoksa normal tahmin yap
         ranked_models = sorted(
             [m for m in self.models if m['total'] >= min_predictions],
             key=lambda m: m['accuracy'],
@@ -92,10 +135,10 @@ class PredictionModel:
         
         if ranked_models:
             best_model = ranked_models[0]
-            return best_model['predict_func'](history)
+            return best_model['predict_func'](history), False
         
         # Yeterli veri yoksa varsayılan olarak son sonucu takip et
-        return self.predict_follow_last(history)
+        return self.predict_follow_last(history), False
     
     def update_model_accuracy(self, winner, predictions):
         """Model doğruluk oranlarını günceller.
@@ -134,6 +177,8 @@ class PredictionModel:
         self.models = self._initialize_models()
         if hasattr(self, 'adaptive_model'):
             self.adaptive_model.clear_memory()
+        self.current_wl_prediction = '?'
+        self.should_reverse_bet = False
     
     def close(self):
         """Kaynakları serbest bırakır."""
@@ -201,6 +246,33 @@ class PredictionModel:
         """
         n = len(current_history)
         return 'P' if n % 2 == 0 else 'B'
+    
+    def predict_wl_reverse(self, current_history):
+        """WL modeline göre tersine tahmin yapar.
+        
+        Args:
+            current_history (list): Oyun geçmişi.
+            
+        Returns:
+            str: Tahmin ('P', 'B' veya '?').
+        """
+        # Eğer normal tahminimiz ve WL tahmini varsa
+        if hasattr(self, 'current_wl_prediction') and self.current_wl_prediction == 'L':
+            # En iyi modelin tahmininin tersini al
+            ranked_models = sorted(
+                [m for m in self.models if m['name'] != 'WL Tersine' and m['total'] > 0],
+                key=lambda m: m['accuracy'],
+                reverse=True
+            )
+            
+            if ranked_models:
+                best_model = ranked_models[0]
+                best_pred = best_model['predict_func'](current_history)
+                
+                if best_pred != '?':
+                    return 'P' if best_pred == 'B' else 'B'
+        
+        return '?'
     
     def _check_grid_square(self, size):
         """Grid içinde belirli bir boyutta kare desenini kontrol eder.
