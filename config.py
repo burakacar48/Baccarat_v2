@@ -22,6 +22,7 @@ UNDO_EMOJI = "↩️"
 CLEAR_EMOJI = "🗑️"
 RESET_EMOJI = "🔄"
 SIMULATE_EMOJI = "▶️"
+SIMULATE_MULTI_EMOJI = "🎮"  # Yeni emoji
 STATS_EMOJI = "📊"
 
 # --- Renkler ---

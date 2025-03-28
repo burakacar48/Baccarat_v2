@@ -3,6 +3,7 @@ Oyun geçmişini ve istatistiklerini yöneten modül.
 Bu modül, oyun sonuçlarını, kasa durumunu ve Martingale stratejisi takibini içerir.
 """
 from config import INITIAL_KASA, MARTINGALE_SEQUENCE, GRID_SIZE, MAX_HISTORY_IN_GRID
+from baccarat_simulator import is_new_shoe_detected
 
 class GameHistory:
     """Oyun geçmişini ve istatistiklerini yöneten sınıf."""
@@ -21,6 +22,7 @@ class GameHistory:
         self.longest_win_streak = 0
         self.longest_loss_streak = 0
         self.grid_data = [[None for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+        self.new_shoe_detected = False
     
     def clear_histories(self):
         """Sadece geçmiş verilerini sıfırlar, kasa durumunu korur."""
@@ -29,6 +31,7 @@ class GameHistory:
         self.current_win_streak = 0
         self.current_loss_streak = 0
         self.grid_data = [[None for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+        self.new_shoe_detected = False
     
     def add_result(self, winner, is_win=None):
         """Yeni bir sonuç ekler ve gerekli istatistikleri günceller.
@@ -40,6 +43,9 @@ class GameHistory:
         Returns:
             dict: Güncelleme bilgilerini içeren sözlük.
         """
+        # Yeni ayakkabı başlayıp başlamadığını kontrol et
+        self.new_shoe_detected = is_new_shoe_detected()
+        
         self.history.append(winner)
         
         bet_index = min(self.current_bet_index, len(MARTINGALE_SEQUENCE) - 1)

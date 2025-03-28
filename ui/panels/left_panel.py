@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QGroupBox, QSizePolicy, QLabel
 )
-from config import UNDO_EMOJI, CLEAR_EMOJI, RESET_EMOJI, SIMULATE_EMOJI, STATS_EMOJI
+from config import UNDO_EMOJI, CLEAR_EMOJI, RESET_EMOJI, SIMULATE_EMOJI, STATS_EMOJI, SIMULATE_MULTI_EMOJI
 from ui.widgets.prediction_view import PredictionLabel
 from PyQt6.QtCore import Qt
 
@@ -184,7 +184,7 @@ class LeftPanel(QWidget):
             {"id": "undo", "emoji": UNDO_EMOJI, "tooltip": "Sonucu Geri Al (Stat Etkilenmez)"},
             {"id": "clear", "emoji": CLEAR_EMOJI, "tooltip": "Geçmişi Temizle"},
             {"id": "reset", "emoji": RESET_EMOJI, "tooltip": "Her Şeyi Sıfırla (Kasa Dahil)"},
-            {"id": "simulate", "emoji": SIMULATE_EMOJI, "tooltip": "Bir Adım Simüle Et"},
+            {"id": "simulate", "emoji": SIMULATE_EMOJI, "tooltip": "Gerçek Baccarat Simüle Et"},
             {"id": "stats", "emoji": STATS_EMOJI, "tooltip": "Model Detayları"}
         ]
         

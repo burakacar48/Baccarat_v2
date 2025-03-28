@@ -12,6 +12,9 @@ from ui.panels.left_panel import LeftPanel
 from ui.panels.right_panel import RightPanel
 from ui.dialogs.model_details import ModelDetailsWindow
 
+# Import the baccarat simulator - only get_next_result is needed
+from baccarat_simulator import get_next_result
+
 # Geçici stil fonksiyonları
 def get_modern_font():
     """Platform'a göre modern bir font döndürür."""
@@ -85,6 +88,10 @@ class MainWindow(QMainWindow):
         
         # Durum değişkenleri
         self.details_window = None
+        
+        # Simülasyon değişkenleri
+        self.current_hand_in_shoe = 0
+        self.pause_simulation = False
         
         # Veritabanı yazma zamanlayıcısı
         self.db_write_timer = QTimer(self)
@@ -210,6 +217,9 @@ class MainWindow(QMainWindow):
         if confirm == QMessageBox.StandardButton.Yes:
             self.game_history.clear_histories()
             self.prediction_model.reset_models()
+            # Simülasyon değişkenlerini sıfırla
+            self.current_hand_in_shoe = 0
+            self.pause_simulation = False
             self._full_ui_update()
             print("Geçmişler temizlendi.")
     
@@ -225,14 +235,50 @@ class MainWindow(QMainWindow):
         if confirm == QMessageBox.StandardButton.Yes:
             self.game_history.reset()
             self.prediction_model.reset_models()
+            # Simülasyon değişkenlerini sıfırla
+            self.current_hand_in_shoe = 0
+            self.pause_simulation = False
             self._full_ui_update()
             print("Her şey sıfırlandı.")
     
     def simulate_step(self):
-        """Rastgele bir sonuç ekler."""
-        winner = random.choice(['P', 'B'])
-        print(f"Simülasyon: {winner}")
+        """Baccarat simülasyonu ile sonuç ekler, 35. elden sonra kazanınca duraklar."""
+        # Eğer simülasyon duraklatılmışsa işlem yapma
+        if self.pause_simulation:
+            print("Simülasyon duraklatıldı. Yeni shoe başladığında otomatik olarak devam edecek.")
+            return
+            
+        # Use the enhanced baccarat simulator
+        winner = get_next_result()  # This will return 'P' or 'B' according to proper baccarat rules
+        
+        # Shoe değişimini kontrol et (yeni shoe başladığında sayacı ve duraklatma durumunu sıfırla)
+        new_shoe_detected = getattr(self.game_history, 'new_shoe_detected', False)
+        if new_shoe_detected:
+            self.current_hand_in_shoe = 0
+            self.pause_simulation = False
+            print("Yeni shoe başladı, simülasyon devam ediyor.")
+            
+        # El sayısını arttır
+        self.current_hand_in_shoe += 1
+        
+        # Sonucu ekle
+        print(f"Simülasyon: El #{self.current_hand_in_shoe} - Sonuç: {winner}")
+        
+        # Mevcut tahmini al
+        current_prediction = self.get_current_prediction()
+        
+        # Tahmini kontrol et ve kazanıp kazanmadığını belirle
+        is_win = None
+        if current_prediction not in ['?', None]:
+            is_win = (current_prediction == winner)
+        
+        # Sonucu ekle
         self.add_result(winner)
+        
+        # 35. elden sonra kazanç durumunda simülasyonu duraksat
+        if self.current_hand_in_shoe > 35 and is_win:
+            self.pause_simulation = True
+            print("35. elden sonra kazanç gerçekleşti. Simülasyon duraklatıldı. Yeni shoe başladığında devam edecek.")
     
     def open_model_details_window(self):
         """Model detayları penceresini açar."""
